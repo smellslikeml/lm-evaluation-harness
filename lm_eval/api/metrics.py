@@ -1,3 +1,4 @@
+import json
 import logging
 import math
 import os
@@ -377,6 +378,42 @@ def chrf_fn(items):  # This is a passthrough function
 )
 def ter_fn(items):  # This is a passthrough function
     return items
+
+
+@register_metric(
+    metric="structured_output_acc",
+    higher_is_better=True,
+    output_type="generate_until",
+    aggregation="mean",
+)
+def structured_output_acc_fn(references, predictions):
+    """Per-document StructTest-style structured-output constraint accuracy.
+
+    Adapted from StructTest (arXiv:2412.18011): a model's structured output is
+    scored on the fraction of compositional constraints it satisfies, rather
+    than against a single target answer. The ``doc_to_target`` reference carries
+    the constraint spec as JSON (``{"constraints": [...]}``); the prediction is
+    the model's raw response. Scoring lives in
+    :mod:`lm_eval.api.structured_output`. Returns three metrics: the per-constraint
+    fraction (``structured_output_acc``), the all-or-nothing view
+    (``structured_output_prompt_acc``), and plain JSON validity
+    (``structured_output_json_valid``).
+    """
+    from lm_eval.api.structured_output import score_response
+
+    reference = references[0] if references else ""
+    prediction = predictions[0] if predictions else ""
+    try:
+        spec = json.loads(reference) if isinstance(reference, str) else reference
+    except (json.JSONDecodeError, TypeError):
+        spec = {}
+    constraints = spec.get("constraints", []) if isinstance(spec, dict) else []
+    scores = score_response(prediction, constraints)
+    return {
+        "structured_output_acc": scores["constraint_level_acc"],
+        "structured_output_prompt_acc": scores["prompt_level_acc"],
+        "structured_output_json_valid": scores["json_valid"],
+    }
 
 
 @register_metric(
