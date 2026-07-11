@@ -214,10 +214,75 @@ def test_dict_metric_uses_custom_aggregation():
     assert agg_metrics["pass@3,none"] == 1.5
 
 
+def test_alias_match_scores_accepted_alias_set():
+    """alias_match extracts a categorical answer from a free-form generation
+    and credits it when it matches any accepted alias (the HOLMES contract).
+
+    Exercises the wiring end to end: the metric is registered through the
+    metrics module, resolved via the registry, and invoked through
+    ConfigurableTask.process_results over an accepted-alias set.
+    """
+    import lm_eval.api.metrics  # noqa: F401  (registers alias_match)
+    from lm_eval.api.registry import get_metric
+
+    alias_match_fn = get_metric("alias_match")
+    assert alias_match_fn is not None, "alias_match must be registered"
+
+    task = MockConfigurableTask()
+    task._config = TaskConfig(
+        task="test_alias_match",
+        output_type="generate_until",
+        metric_list=[{"metric": "alias_match"}],
+    )
+    task.OUTPUT_TYPE = "generate_until"
+    task.multiple_target = 1
+    task._metric_fn_list = {"alias_match": alias_match_fn}
+    task._metric_fn_kwargs = {"alias_match": {}}
+    task._aggregation_list = {}
+    task._higher_is_better = {}
+    task.doc_to_target = lambda doc: doc["answer_aliases"]
+
+    doc = {"answer_aliases": ["Valid Contract", "Enforceable", "Enforced"]}
+
+    # Correct answer buried in a chain of thought.
+    correct = task.process_results(
+        doc, ["The clause creates an obligation... the answer is Enforceable."]
+    )
+    assert correct["alias_match"] == 1.0
+
+    # Surface variation (article + capitalization) normalizes to an alias.
+    paraphrased = task.process_results(doc, ["Answer: A Valid Contract."])
+    assert paraphrased["alias_match"] == 1.0
+
+    # An answer outside the accepted set is not credited.
+    wrong = task.process_results(doc, ["the answer is Unconscionable"])
+    assert wrong["alias_match"] == 0.0
+
+
+def test_alias_match_extraction_normalization_unit():
+    """Direct checks for the extraction + normalization helpers."""
+    from lm_eval.api.answer_matching import (
+        alias_match,
+        extract_answer,
+        normalize_label,
+    )
+
+    assert normalize_label("A Valid Contract") == "valid contract"
+    assert extract_answer("blah blah. the answer is Enforceable.") == "Enforceable"
+    assert alias_match(predictions=["the answer is Yes."], references=["yes"]) == {
+        "alias_match": 1.0
+    }
+    assert alias_match(predictions=["the answer is Maybe."], references=["yes"]) == {
+        "alias_match": 0.0
+    }
+
+
 if __name__ == "__main__":
     test_acc_mutual_info_slicing()
     test_acc_mutual_info_different_predictions()
     test_acc_mutual_info_without_metric()
     test_bootstrap_internal_no_mp()
     test_dict_metric_uses_custom_aggregation()
+    test_alias_match_scores_accepted_alias_set()
+    test_alias_match_extraction_normalization_unit()
     print("All tests passed!")

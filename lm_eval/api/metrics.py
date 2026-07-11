@@ -10,6 +10,7 @@ from typing import Callable, List, Optional, Sequence, TypeVar
 import numpy as np
 import sacrebleu
 
+from lm_eval.api.answer_matching import alias_match as _alias_match
 from lm_eval.api.registry import register_aggregation, register_metric
 
 
@@ -253,6 +254,18 @@ def exact_match_hf_evaluate(
 )
 def exact_match_fn(**kwargs):
     return exact_match_hf_evaluate(**kwargs)
+
+
+@register_metric(
+    metric="alias_match",
+    higher_is_better=True,
+    output_type="generate_until",
+    aggregation="mean",
+)
+def alias_match_fn(**kwargs):
+    # Extracts a categorical answer from a free-form generation and credits it
+    # when it matches any accepted alias after normalization (HOLMES contract).
+    return _alias_match(**kwargs)
 
 
 @register_metric(
