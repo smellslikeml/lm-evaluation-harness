@@ -11,10 +11,13 @@ benchmarks are vulnerable to.
 
 This module implements that constraint-satisfaction scoring as a reusable,
 dependency-free validator (stdlib ``json``/``re`` only -- no learned
-estimators, no external artifacts). It is wired into the harness as the
-``structured_output_acc`` metric registered in :mod:`lm_eval.api.metrics`; any
-``generate_until`` task can opt in by listing its constraints in
-``doc_to_target`` as a JSON spec (see :func:`score_response`).
+estimators, no external artifacts). It covers the paper's JSON constraints and
+delegates the Summarization domain's text-structure constraints (bullet /
+sentence / word counts) to :mod:`lm_eval.api.text_structure`, so a single spec
+may mix both. It is wired into the harness as the ``structured_output_acc``
+metric registered in :mod:`lm_eval.api.metrics`; any ``generate_until`` task can
+opt in by listing its constraints in ``doc_to_target`` as a JSON spec (see
+:func:`score_response`).
 
 Mode-2 adaptation: the paper's bespoke benchmark dataset and task suite are
 replaced by this harness-native metric; the core compositional-constraint
@@ -27,6 +30,8 @@ import json
 import re
 from collections.abc import Sequence
 from typing import Any
+
+from lm_eval.api.text_structure import TEXT_CONSTRAINT_TYPES, check_text_constraint
 
 
 __all__ = [
@@ -210,21 +215,32 @@ def score_response(
     is 1.0 only when *every* constraint holds (the all-or-nothing view). Both
     collapse to ``json_valid`` when no constraints are supplied, so the metric
     can also be used as a plain structured-output validity check.
+
+    Constraints from either StructTest domain may be mixed in one spec:
+    text-structure types (see :mod:`lm_eval.api.text_structure`) are checked
+    against the raw response, while JSON types are checked against the parsed
+    object. Text-only specs therefore score correctly even when the response is
+    not JSON (``json_valid`` simply reports whether a JSON payload was present).
     """
     parsed = [_coerce(c) for c in constraints]
     obj, ok = extract_structured(response)
 
-    if not ok or not parsed:
+    if not parsed:
         return {
             "json_valid": int(ok),
             "constraint_level_acc": float(ok),
             "prompt_level_acc": int(ok),
-            "num_constraints": len(parsed),
+            "num_constraints": 0,
         }
 
-    flags = [check_constraint(obj, c) for c in parsed]
+    flags = []
+    for c in parsed:
+        if c.type in TEXT_CONSTRAINT_TYPES:
+            flags.append(check_text_constraint(response, c))
+        else:
+            flags.append(ok and check_constraint(obj, c))
     return {
-        "json_valid": 1,
+        "json_valid": int(ok),
         "constraint_level_acc": sum(flags) / len(flags),
         "prompt_level_acc": int(all(flags)),
         "num_constraints": len(parsed),
