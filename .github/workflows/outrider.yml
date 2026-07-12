@@ -57,6 +57,7 @@ jobs:
       issues: write
     env:
       REMYX_API_KEY: ${{ secrets.REMYX_API_KEY }}
+      LINEAR_API_KEY: ${{ secrets.LINEAR_API_KEY }}
       # ANTHROPIC_API_KEY / ANTHROPIC_AUTH_TOKEN / ANTHROPIC_MODEL are
       # written to $GITHUB_ENV by the "Configure provider auth" step
       # below (auth env vars are mutually exclusive — non-Anthropic
