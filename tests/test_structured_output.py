@@ -172,3 +172,82 @@ def test_score_response_reports_both_views():
     assert scores["constraint_level_acc"] == 2 / 3
     assert scores["prompt_level_acc"] == 0
     assert scores["num_constraints"] == 3
+
+
+# ---------------------------------------------------------------------------
+# Edge-case coverage exercised through the registered metric function
+# (imported from the non-new lm_eval.api.metrics module, so these prove the
+# wiring, not just the capability module in isolation).
+# ---------------------------------------------------------------------------
+
+
+def _metric(target_spec, prediction):
+    """Invoke the registered metric the way process_results does."""
+    return structured_output_acc_fn([target_spec], [prediction])
+
+
+def test_metric_empty_predictions_list_scores_zero():
+    # An empty (or missing) prediction must never raise and must score 0 on
+    # every view -- otherwise a model that emitted nothing could be scored as
+    # if it were correct.
+    spec = _spec({"type": "key_present", "path": "name"})
+    result = structured_output_acc_fn([spec], [])
+    assert result == {
+        "structured_output_acc": 0.0,
+        "structured_output_prompt_acc": 0,
+        "structured_output_json_valid": 0,
+    }
+    # Empty references as well -> no constraints, no output -> still all zero.
+    assert structured_output_acc_fn([], [])["structured_output_json_valid"] == 0
+
+
+def test_metric_malformed_json_is_not_valid():
+    # Looks structured (has braces) but is not parseable JSON (trailing comma);
+    # extraction must fail rather than the brace-scan silently "recovering" it.
+    spec = _spec({"type": "json_valid"})
+    result = _metric(spec, '{"a": 1, "b": 2,}')
+    assert result["structured_output_json_valid"] == 0
+    assert result["structured_output_acc"] == 0.0
+    assert result["structured_output_prompt_acc"] == 0
+
+
+def test_metric_structurally_valid_but_semantically_wrong():
+    # Correct JSON shape and correct types, but a value that violates a
+    # field_equals constraint: JSON validity is 1 while the constraint views
+    # drop below full -- structural correctness must not imply a passing score.
+    spec = _spec(
+        {"type": "type_is", "path": "status", "params": {"type": "string"}},
+        {"type": "field_equals", "path": "status", "params": {"value": "ok"}},
+    )
+    result = _metric(spec, json.dumps({"status": "error"}))
+    assert result["structured_output_json_valid"] == 1
+    assert result["structured_output_acc"] == 0.5
+    assert result["structured_output_prompt_acc"] == 0
+
+
+def test_metric_scores_first_prediction_of_a_batch():
+    # generate_until can hand the metric several candidate responses per doc
+    # (e.g. repeats / self-consistency). The per-document contract is to score
+    # the first candidate; the extra candidates must not change the result.
+    spec = _spec({"type": "key_present", "path": "name"})
+    good = json.dumps({"name": "Ada"})
+    bad = "no structure here"
+    first_good = structured_output_acc_fn([spec], [good, bad])
+    first_bad = structured_output_acc_fn([spec], [bad, good])
+    assert first_good["structured_output_prompt_acc"] == 1
+    assert first_bad["structured_output_prompt_acc"] == 0
+
+
+def test_metric_partial_score_never_rounds_up_to_prompt_level_pass():
+    # A "tie" at a fractional constraint score (here exactly 0.5) is reported
+    # deterministically and must never be promoted to a prompt-level pass:
+    # prompt_level is strictly all-or-nothing, so partial credit stays partial.
+    spec = _spec(
+        {"type": "key_present", "path": "a"},
+        {"type": "key_present", "path": "b"},
+    )
+    result = _metric(spec, json.dumps({"a": 1}))
+    assert result["structured_output_acc"] == 0.5
+    assert result["structured_output_prompt_acc"] == 0
+    # Deterministic: scoring the same response again yields the same numbers.
+    assert _metric(spec, json.dumps({"a": 1})) == result
