@@ -1,10 +1,12 @@
 name: Outrider
 
 on:
-  # Continuous-mode cron. Fires every 15 min; concurrency group serializes
-  # so only one Outrider dispatch runs at a time per fork.
-  schedule:
-    - cron: '*/15 * * * *'
+  # Continuous-mode cron disabled — guardrails allowlist matches only .yaml/.json,
+  # but lm-eval templates use trailing '_yaml' suffix (no dot) so the coding
+  # agent keeps getting rejected on path violations. Also the selection-fallback
+  # keeps re-picking HOLMES after each rejection. Rotate to ultralytics.
+  # schedule:
+  #   - cron: '*/15 * * * *'
   workflow_dispatch:
     inputs:
       provider:
