@@ -87,6 +87,11 @@ jobs:
         with:
           interest-id: 8c1efeca-5f8f-47e6-8d14-4e3b0c3a74dd
           rate-limit-days: '0'
+          # lm-evaluation-harness registers new tasks via YAML files under
+          # lm_eval/tasks/<name>/*.yaml — extend the default allowlist so
+          # the coding agent's task-addition PRs aren't rejected as path
+          # violations (default is *.py + .remyx-recommendation/** + **/*.md).
+          guardrails-allowlist: 'lm_eval/**/*.yaml,lm_eval/**/*.json'
           search-method: ${{ inputs.search-method || '' }}
           pin-arxiv: ${{ inputs.pin-arxiv || '' }}
           claude-timeout: ${{ inputs.claude-timeout || '900' }}
